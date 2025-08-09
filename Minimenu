@@ -1,11 +1,407 @@
-local armaDesejada = "AK DRAGON" -- Nome da arma exato
-local player = game.Players.LocalPlayer
-local armas = player["."] -- Onde estão suas armas
-local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+#include <iostream>
+#include <Windows.h>
+#include <vector>
+#include <string>
+#include <algorithm>
+#include <thread>
+#include <chrono>
 
-for _, arma in pairs(armas:GetChildren()) do
-    if arma:IsA("Tool") and arma.Name == armaDesejada then
-        humanoid:EquipTool(arma)
-        break
-    end
-end
+using namespace std;
+
+// Estrutura para representar um jogador (simulação)
+struct Player {
+    float x, y;
+    float health;
+    string name;
+    bool isEnemy;
+};
+
+// Variáveis globais
+bool isRunning = true;
+bool isMinimized = false;
+bool showMenu = true;
+bool aimbotEnabled = false;
+bool espLineEnabled = false;
+bool espHealthEnabled = false;
+bool espNameEnabled = false;
+int aimbotTarget = 0; // 0 = cabeça, 1 = peito
+
+// Posição e tamanho do menu
+int menuX = 100, menuY = 100;
+int menuWidth = 300, menuHeight = 400;
+bool dragging = false;
+int dragOffsetX, dragOffsetY;
+
+// Simulação de jogadores (para demonstração)
+vector<Player> players = {
+    {100.0f, 150.0f, 75.0f, "Player1", true},
+    {200.0f, 250.0f, 50.0f, "Player2", true},
+    {300.0f, 350.0f, 25.0f, "Player3", true}
+};
+
+// Função para desenhar o menu
+void DrawMenu(HDC hdc) {
+    // Fundo do menu
+    HBRUSH bgBrush = CreateSolidBrush(RGB(30, 30, 40));
+    HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, bgBrush);
+    Rectangle(hdc, menuX, menuY, menuX + menuWidth, menuY + menuHeight);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(bgBrush);
+
+    // Barra de título
+    HBRUSH titleBrush = CreateSolidBrush(RGB(50, 50, 70));
+    oldBrush = (HBRUSH)SelectObject(hdc, titleBrush);
+    Rectangle(hdc, menuX, menuY, menuX + menuWidth, menuY + 30);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(titleBrush);
+
+    // Texto do título
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(255, 255, 255));
+    TextOutA(hdc, menuX + 10, menuY + 8, "Menu de Hacks", 12);
+
+    // Botão de fechar
+    HBRUSH closeBrush = CreateSolidBrush(RGB(255, 50, 50));
+    oldBrush = (HBRUSH)SelectObject(hdc, closeBrush);
+    Rectangle(hdc, menuX + menuWidth - 30, menuY + 5, menuX + menuWidth - 10, menuY + 25);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(closeBrush);
+    TextOutA(hdc, menuX + menuWidth - 25, menuY + 8, "X", 1);
+
+    // Botão de minimizar
+    HBRUSH minBrush = CreateSolidBrush(RGB(50, 150, 50));
+    oldBrush = (HBRUSH)SelectObject(hdc, minBrush);
+    Rectangle(hdc, menuX + menuWidth - 60, menuY + 5, menuX + menuWidth - 40, menuY + 25);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(minBrush);
+    TextOutA(hdc, menuX + menuWidth - 55, menuY + 8, "_", 1);
+
+    // Conteúdo do menu
+    int yOffset = 50;
+
+    // Aimbot toggle
+    HBRUSH toggleBg = CreateSolidBrush(RGB(70, 70, 80));
+    oldBrush = (HBRUSH)SelectObject(hdc, toggleBg);
+    Rectangle(hdc, menuX + 20, menuY + yOffset, menuX + menuWidth - 20, menuY + yOffset + 30);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(toggleBg);
+
+    HBRUSH toggleBtn = CreateSolidBrush(aimbotEnabled ? RGB(0, 255, 0) : RGB(255, 0, 0));
+    oldBrush = (HBRUSH)SelectObject(hdc, toggleBtn);
+    Rectangle(hdc, menuX + menuWidth - 50, menuY + yOffset + 5, menuX + menuWidth - 25, menuY + yOffset + 25);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(toggleBtn);
+
+    TextOutA(hdc, menuX + 30, menuY + yOffset + 8, "Aimbot", 6);
+    yOffset += 40;
+
+    // Opções do aimbot (só aparece se o aimbot estiver ativado)
+    if (aimbotEnabled) {
+        TextOutA(hdc, menuX + 30, menuY + yOffset + 8, "Alvo:", 5);
+        
+        // Botão de seleção de alvo (cabeça/peito)
+        HBRUSH targetBg = CreateSolidBrush(RGB(70, 70, 80));
+        oldBrush = (HBRUSH)SelectObject(hdc, targetBg);
+        Rectangle(hdc, menuX + 80, menuY + yOffset, menuX + 180, menuY + yOffset + 25);
+        SelectObject(hdc, oldBrush);
+        DeleteObject(targetBg);
+
+        TextOutA(hdc, menuX + 85, menuY + yOffset + 5, aimbotTarget == 0 ? "Cabeca" : "Peito", aimbotTarget == 0 ? 6 : 5);
+        yOffset += 35;
+    }
+
+    // ESP Line toggle
+    toggleBg = CreateSolidBrush(RGB(70, 70, 80));
+    oldBrush = (HBRUSH)SelectObject(hdc, toggleBg);
+    Rectangle(hdc, menuX + 20, menuY + yOffset, menuX + menuWidth - 20, menuY + yOffset + 30);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(toggleBg);
+
+    toggleBtn = CreateSolidBrush(espLineEnabled ? RGB(0, 255, 0) : RGB(255, 0, 0));
+    oldBrush = (HBRUSH)SelectObject(hdc, toggleBtn);
+    Rectangle(hdc, menuX + menuWidth - 50, menuY + yOffset + 5, menuX + menuWidth - 25, menuY + yOffset + 25);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(toggleBtn);
+
+    TextOutA(hdc, menuX + 30, menuY + yOffset + 8, "ESP Linha", 9);
+    yOffset += 40;
+
+    // ESP Health toggle
+    toggleBg = CreateSolidBrush(RGB(70, 70, 80));
+    oldBrush = (HBRUSH)SelectObject(hdc, toggleBg);
+    Rectangle(hdc, menuX + 20, menuY + yOffset, menuX + menuWidth - 20, menuY + yOffset + 30);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(toggleBg);
+
+    toggleBtn = CreateSolidBrush(espHealthEnabled ? RGB(0, 255, 0) : RGB(255, 0, 0));
+    oldBrush = (HBRUSH)SelectObject(hdc, toggleBtn);
+    Rectangle(hdc, menuX + menuWidth - 50, menuY + yOffset + 5, menuX + menuWidth - 25, menuY + yOffset + 25);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(toggleBtn);
+
+    TextOutA(hdc, menuX + 30, menuY + yOffset + 8, "ESP Vida", 8);
+    yOffset += 40;
+
+    // ESP Name toggle
+    toggleBg = CreateSolidBrush(RGB(70, 70, 80));
+    oldBrush = (HBRUSH)SelectObject(hdc, toggleBg);
+    Rectangle(hdc, menuX + 20, menuY + yOffset, menuX + menuWidth - 20, menuY + yOffset + 30);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(toggleBg);
+
+    toggleBtn = CreateSolidBrush(espNameEnabled ? RGB(0, 255, 0) : RGB(255, 0, 0));
+    oldBrush = (HBRUSH)SelectObject(hdc, toggleBtn);
+    Rectangle(hdc, menuX + menuWidth - 50, menuY + yOffset + 5, menuX + menuWidth - 25, menuY + yOffset + 25);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(toggleBtn);
+
+    TextOutA(hdc, menuX + 30, menuY + yOffset + 8, "ESP Nome", 8);
+}
+
+// Função para desenhar o ESP
+void DrawESP(HDC hdc) {
+    if (!espLineEnabled && !espHealthEnabled && !espNameEnabled) return;
+
+    for (const auto& player : players) {
+        if (!player.isEnemy) continue;
+
+        int screenX = (int)player.x;
+        int screenY = (int)player.y;
+
+        // ESP Linha
+        if (espLineEnabled) {
+            HPEN hPen = CreatePen(PS_SOLID, 2, RGB(255, 0, 0));
+            HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+            
+            MoveToEx(hdc, 960, 1080, NULL); // Centro da tela (supondo resolução 1920x1080)
+            LineTo(hdc, screenX, screenY);
+            
+            SelectObject(hdc, hOldPen);
+            DeleteObject(hPen);
+        }
+
+        // ESP Vida
+        if (espHealthEnabled) {
+            int healthBarWidth = 50;
+            int healthBarHeight = 5;
+            int healthWidth = (int)(healthBarWidth * (player.health / 100.0f));
+
+            // Fundo da barra de vida
+            HBRUSH bgBrush = CreateSolidBrush(RGB(255, 0, 0));
+            HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, bgBrush);
+            Rectangle(hdc, screenX - healthBarWidth/2, screenY - 20, 
+                     screenX + healthBarWidth/2, screenY - 15);
+            SelectObject(hdc, oldBrush);
+            DeleteObject(bgBrush);
+
+            // Vida atual
+            HBRUSH healthBrush = CreateSolidBrush(RGB(0, 255, 0));
+            oldBrush = (HBRUSH)SelectObject(hdc, healthBrush);
+            Rectangle(hdc, screenX - healthBarWidth/2, screenY - 20, 
+                     screenX - healthBarWidth/2 + healthWidth, screenY - 15);
+            SelectObject(hdc, oldBrush);
+            DeleteObject(healthBrush);
+        }
+
+        // ESP Nome
+        if (espNameEnabled) {
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(255, 255, 255));
+            TextOutA(hdc, screenX - 20, screenY - 35, player.name.c_str(), player.name.length());
+        }
+    }
+}
+
+// Função do aimbot (simulada)
+void AimbotThread() {
+    while (isRunning) {
+        if (aimbotEnabled && !players.empty()) {
+            // Simulação: move o cursor para o jogador mais próximo
+            Player target = players[0];
+            
+            // Na implementação real, aqui você miraria no jogador
+            // Esta é apenas uma simulação para demonstração
+            if (aimbotTarget == 0) {
+                // Mira na cabeça (y - 10)
+                cout << "Aimbot mirando na cabeca de " << target.name << endl;
+            } else {
+                // Mira no peito
+                cout << "Aimbot mirando no peito de " << target.name << endl;
+            }
+        }
+        this_thread::sleep_for(chrono::milliseconds(100));
+    }
+}
+
+// Função principal da janela
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            
+            // Preenche o fundo com preto
+            HBRUSH hBrush = CreateSolidBrush(RGB(0, 0, 0));
+            FillRect(hdc, &ps.rcPaint, hBrush);
+            DeleteObject(hBrush);
+            
+            if (showMenu && !isMinimized) {
+                DrawMenu(hdc);
+            }
+            
+            DrawESP(hdc);
+            
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        
+        case WM_LBUTTONDOWN: {
+            int x = LOWORD(lParam);
+            int y = HIWORD(lParam);
+            
+            // Verifica se clicou na barra de título
+            if (showMenu && !isMinimized && x >= menuX && x <= menuX + menuWidth && 
+                y >= menuY && y <= menuY + 30) {
+                dragging = true;
+                dragOffsetX = x - menuX;
+                dragOffsetY = y - menuY;
+            }
+            
+            // Verifica se clicou no botão de fechar
+            if (showMenu && !isMinimized && x >= menuX + menuWidth - 30 && 
+                x <= menuX + menuWidth - 10 && y >= menuY + 5 && y <= menuY + 25) {
+                isRunning = false;
+                PostQuitMessage(0);
+            }
+            
+            // Verifica se clicou no botão de minimizar
+            if (showMenu && !isMinimized && x >= menuX + menuWidth - 60 && 
+                x <= menuX + menuWidth - 40 && y >= menuY + 5 && y <= menuY + 25) {
+                isMinimized = true;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            
+            // Verifica se clicou no toggle do aimbot
+            if (showMenu && !isMinimized && x >= menuX + menuWidth - 50 && 
+                x <= menuX + menuWidth - 25 && y >= menuY + 55 && y <= menuY + 75) {
+                aimbotEnabled = !aimbotEnabled;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            
+            // Verifica se clicou no alvo do aimbot
+            if (showMenu && !isMinimized && aimbotEnabled && x >= menuX + 80 && 
+                x <= menuX + 180 && y >= menuY + 90 && y <= menuY + 115) {
+                aimbotTarget = (aimbotTarget + 1) % 2;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            
+            // Verifica se clicou no toggle do ESP Linha
+            if (showMenu && !isMinimized && x >= menuX + menuWidth - 50 && 
+                x <= menuX + menuWidth - 25 && y >= menuY + 135 && y <= menuY + 155) {
+                espLineEnabled = !espLineEnabled;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            
+            // Verifica se clicou no toggle do ESP Vida
+            if (showMenu && !isMinimized && x >= menuX + menuWidth - 50 && 
+                x <= menuX + menuWidth - 25 && y >= menuY + 175 && y <= menuY + 195) {
+                espHealthEnabled = !espHealthEnabled;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            
+            // Verifica se clicou no toggle do ESP Nome
+            if (showMenu && !isMinimized && x >= menuX + menuWidth - 50 && 
+                x <= menuX + menuWidth - 25 && y >= menuY + 215 && y <= menuY + 235) {
+                espNameEnabled = !espNameEnabled;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            
+            // Verifica se clicou no menu minimizado
+            if (isMinimized && x >= menuX && x <= menuX + 100 && y >= menuY && y <= menuY + 30) {
+                isMinimized = false;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            
+            return 0;
+        }
+        
+        case WM_LBUTTONUP: {
+            dragging = false;
+            return 0;
+        }
+        
+        case WM_MOUSEMOVE: {
+            if (dragging) {
+                menuX = LOWORD(lParam) - dragOffsetX;
+                menuY = HIWORD(lParam) - dragOffsetY;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            return 0;
+        }
+        
+        case WM_DESTROY: {
+            isRunning = false;
+            PostQuitMessage(0);
+            return 0;
+        }
+        
+        default:
+            return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Cria a janela
+    const char CLASS_NAME[] = "Hack Menu";
+    
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = WindowProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = CLASS_NAME;
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    
+    RegisterClass(&wc);
+    
+    HWND hwnd = CreateWindowEx(
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT,
+        CLASS_NAME,
+        "Hack Menu",
+        WS_POPUP,
+        0, 0, 1920, 1080,
+        NULL,
+        NULL,
+        hInstance,
+        NULL
+    );
+    
+    if (hwnd == NULL) {
+        return 0;
+    }
+    
+    // Configura a janela para ser transparente
+    SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
+    
+    ShowWindow(hwnd, nCmdShow);
+    
+    // Inicia a thread do aimbot
+    thread aimbot(AimbotThread);
+    
+    // Loop de mensagens
+    MSG msg = {};
+    while (isRunning && GetMessage(&msg, NULL, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+        
+        // Redesenha a janela continuamente
+        InvalidateRect(hwnd, NULL, TRUE);
+        UpdateWindow(hwnd);
+    }
+    
+    // Encerra a thread do aimbot
+    isRunning = false;
+    if (aimbot.joinable()) {
+        aimbot.join();
+    }
+    
+    return 0;
+}
